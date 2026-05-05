@@ -50,7 +50,8 @@ export async function POST(req: NextRequest) {
     if (err instanceof z.ZodError) {
       return NextResponse.json({ error: 'Invalid input' }, { status: 400 })
     }
-    console.error('Login error:', err)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('Login error:', message)
+    return NextResponse.json({ error: 'Internal server error', detail: message }, { status: 500 })
   }
 }
