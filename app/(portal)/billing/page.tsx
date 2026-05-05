@@ -84,19 +84,6 @@ export default function BillingPage() {
     fetchAll()
   }
 
-  // kept for legacy reference — no longer used directly
-  async function _handleSaveCardLegacy() {
-    setActionLoading('save-card')
-    setMessage(null)
-    try {
-      // no-op placeholder
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.message })
-    } finally {
-      setActionLoading(null)
-    }
-  }
-
   async function handleDeleteCard(id: string) {
     if (!confirm('Remove this payment method?')) return
     setActionLoading('delete-' + id)
