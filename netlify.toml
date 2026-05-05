@@ -1,0 +1,16 @@
+[build]
+  command = "npx prisma generate && npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+  PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING = "1"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Stripe webhook — exempt from CSRF / body parsing
+[[headers]]
+  for = "/api/billing/webhook"
+  [headers.values]
+    X-Frame-Options = "DENY"
