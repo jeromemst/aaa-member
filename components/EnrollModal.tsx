@@ -34,6 +34,8 @@ interface EnrollFormProps {
   onClose: () => void
 }
 
+const isDev = process.env.NEXT_PUBLIC_ENABLE_DEV_BYPASS === 'true'
+
 function EnrollForm({ plan, accessToken, onSuccess, onClose }: EnrollFormProps) {
   const stripe = useStripe()
   const elements = useElements()
@@ -50,7 +52,6 @@ function EnrollForm({ plan, accessToken, onSuccess, onClose }: EnrollFormProps) 
     const cardElement = elements.getElement(CardElement)
     if (!cardElement) return
 
-    // Create payment method from card details
     const { error: pmError, paymentMethod } = await stripe.createPaymentMethod({
       type: 'card',
       card: cardElement,
@@ -62,7 +63,6 @@ function EnrollForm({ plan, accessToken, onSuccess, onClose }: EnrollFormProps) 
       return
     }
 
-    // Enroll in plan
     const res = await fetch('/api/policies', {
       method: 'POST',
       headers: {
@@ -75,6 +75,29 @@ function EnrollForm({ plan, accessToken, onSuccess, onClose }: EnrollFormProps) 
     const data = await res.json()
     if (!res.ok) {
       setError(data.error ?? 'Enrollment failed. Please try again.')
+      setLoading(false)
+      return
+    }
+
+    onSuccess(data.policy)
+  }
+
+  async function handleDevBypass() {
+    setLoading(true)
+    setError('')
+
+    const res = await fetch('/api/policies', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ planId: plan.id, devBypass: true }),
+    })
+
+    const data = await res.json()
+    if (!res.ok) {
+      setError(data.error ?? 'Enrollment failed.')
       setLoading(false)
       return
     }
@@ -111,6 +134,20 @@ function EnrollForm({ plan, accessToken, onSuccess, onClose }: EnrollFormProps) 
           Secured by Stripe. We never store your card details.
         </p>
       </div>
+
+      {isDev && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+          <p className="text-xs font-medium text-amber-700 mb-2">Dev mode</p>
+          <button
+            type="button"
+            onClick={handleDevBypass}
+            disabled={loading}
+            className="w-full px-3 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-md text-sm font-medium transition-colors disabled:opacity-50"
+          >
+            Skip payment (dev bypass)
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">

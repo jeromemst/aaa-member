@@ -7,7 +7,8 @@ import { generatePolicyNumber, addMonths } from '@/lib/utils'
 
 const enrollSchema = z.object({
   planId: z.string(),
-  paymentMethodId: z.string(), // Stripe payment method ID
+  paymentMethodId: z.string().optional(),
+  devBypass: z.boolean().optional(),
 })
 
 // GET /api/policies — list member's policies
@@ -34,7 +35,13 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { planId, paymentMethodId } = enrollSchema.parse(body)
+    const { planId, paymentMethodId, devBypass } = enrollSchema.parse(body)
+
+    const isDevBypass = devBypass === true && process.env.NEXT_PUBLIC_ENABLE_DEV_BYPASS === 'true'
+
+    if (!isDevBypass && !paymentMethodId) {
+      return NextResponse.json({ error: 'paymentMethodId is required' }, { status: 400 })
+    }
 
     const plan = await prisma.insurancePlan.findUnique({ where: { id: planId } })
     if (!plan) return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
@@ -42,34 +49,66 @@ export async function POST(req: NextRequest) {
     const member = await prisma.member.findUnique({ where: { id: user.sub } })
     if (!member) return NextResponse.json({ error: 'Member not found' }, { status: 404 })
 
-    // Get or create Stripe customer
-    const stripeCustomerId = await getOrCreateStripeCustomer(
-      member.id,
-      member.email,
-      `${member.firstName} ${member.lastName}`,
-      member.stripeCustomerId
-    )
+    if (!isDevBypass) {
+      // Get or create Stripe customer
+      const stripeCustomerId = await getOrCreateStripeCustomer(
+        member.id,
+        member.email,
+        `${member.firstName} ${member.lastName}`,
+        member.stripeCustomerId
+      )
 
-    if (!member.stripeCustomerId) {
-      await prisma.member.update({ where: { id: member.id }, data: { stripeCustomerId } })
+      if (!member.stripeCustomerId) {
+        await prisma.member.update({ where: { id: member.id }, data: { stripeCustomerId } })
+      }
+
+      // Charge first premium via Stripe
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: Math.round(plan.premium * 100), // cents
+        currency: 'usd',
+        customer: stripeCustomerId,
+        payment_method: paymentMethodId,
+        confirm: true,
+        automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+        description: `First premium for ${plan.name}`,
+        metadata: { memberId: member.id, planId: plan.id },
+      })
+
+      if (paymentIntent.status !== 'succeeded') {
+        return NextResponse.json({ error: 'Payment failed', status: paymentIntent.status }, { status: 402 })
+      }
+
+      const now = new Date()
+      const renewalDate = addMonths(now, plan.billingCycle === 'ANNUAL' ? 12 : plan.billingCycle === 'QUARTERLY' ? 3 : 1)
+
+      const policy = await prisma.policy.create({
+        data: {
+          policyNumber: generatePolicyNumber(),
+          memberId: member.id,
+          planId: plan.id,
+          status: 'ACTIVE',
+          startDate: now,
+          renewalDate,
+        },
+        include: { plan: true },
+      })
+
+      await prisma.billingHistory.create({
+        data: {
+          memberId: member.id,
+          policyId: policy.id,
+          amount: plan.premium,
+          status: 'SUCCEEDED',
+          description: `First premium — ${plan.name}`,
+          stripePaymentIntentId: paymentIntent.id,
+          paidAt: new Date(),
+        },
+      })
+
+      return NextResponse.json({ policy }, { status: 201 })
     }
 
-    // Charge first premium via Stripe
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(plan.premium * 100), // cents
-      currency: 'usd',
-      customer: stripeCustomerId,
-      payment_method: paymentMethodId,
-      confirm: true,
-      automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
-      description: `First premium for ${plan.name}`,
-      metadata: { memberId: member.id, planId: plan.id },
-    })
-
-    if (paymentIntent.status !== 'succeeded') {
-      return NextResponse.json({ error: 'Payment failed', status: paymentIntent.status }, { status: 402 })
-    }
-
+    // Dev bypass — skip Stripe entirely
     const now = new Date()
     const renewalDate = addMonths(now, plan.billingCycle === 'ANNUAL' ? 12 : plan.billingCycle === 'QUARTERLY' ? 3 : 1)
 
@@ -85,15 +124,14 @@ export async function POST(req: NextRequest) {
       include: { plan: true },
     })
 
-    // Record billing history
     await prisma.billingHistory.create({
       data: {
         memberId: member.id,
         policyId: policy.id,
         amount: plan.premium,
         status: 'SUCCEEDED',
-        description: `First premium — ${plan.name}`,
-        stripePaymentIntentId: paymentIntent.id,
+        description: `First premium — ${plan.name} (dev bypass)`,
+        stripePaymentIntentId: 'dev_bypass',
         paidAt: new Date(),
       },
     })
