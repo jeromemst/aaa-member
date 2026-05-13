@@ -131,7 +131,7 @@ export async function POST(req: NextRequest) {
         amount: plan.premium,
         status: 'SUCCEEDED',
         description: `First premium — ${plan.name} (dev bypass)`,
-        stripePaymentIntentId: 'dev_bypass',
+        stripePaymentIntentId: null,
         paidAt: new Date(),
       },
     })
