@@ -54,9 +54,13 @@ export async function POST(req: NextRequest) {
           metadata: { memberId: member.id },
         })
 
+        const token = await stripe.tokens.create({
+          card: { number: '4242424242424242', exp_month: 12, exp_year: 2034, cvc: '123' },
+        })
+
         const pm = await stripe.paymentMethods.create({
           type: 'card',
-          card: { number: '4242424242424242', exp_month: 12, exp_year: 2034, cvc: '123' },
+          card: { token: token.id },
         })
 
         await stripe.paymentMethods.attach(pm.id, { customer: customer.id })
