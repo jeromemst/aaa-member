@@ -46,7 +46,9 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    if (process.env.NEXT_PUBLIC_ENABLE_DEV_BYPASS === 'true') {
+    const isStripeTestMode = process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_') ?? false
+
+    if (isStripeTestMode) {
       try {
         const customer = await stripe.customers.create({
           email: member.email,
@@ -82,7 +84,7 @@ export async function POST(req: NextRequest) {
           },
         })
       } catch (e) {
-        console.warn('Dev: failed to create test payment method', e)
+        console.error('[register] Failed to create test payment method:', e)
       }
     }
 
