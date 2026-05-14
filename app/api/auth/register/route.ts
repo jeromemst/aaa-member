@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { signAccessToken, signRefreshToken, getRefreshTokenExpiry } from '@/lib/auth'
+import { stripe } from '@/lib/stripe'
 
 const schema = z.object({
   email: z.string().email(),
@@ -44,6 +45,42 @@ export async function POST(req: NextRequest) {
         expiresAt: getRefreshTokenExpiry(),
       },
     })
+
+    if (process.env.NEXT_PUBLIC_ENABLE_DEV_BYPASS === 'true') {
+      try {
+        const customer = await stripe.customers.create({
+          email: member.email,
+          name: `${member.firstName} ${member.lastName}`,
+          metadata: { memberId: member.id },
+        })
+
+        const pm = await stripe.paymentMethods.create({
+          type: 'card',
+          card: { number: '4242424242424242', exp_month: 12, exp_year: 2034, cvc: '123' },
+        })
+
+        await stripe.paymentMethods.attach(pm.id, { customer: customer.id })
+
+        await prisma.member.update({
+          where: { id: member.id },
+          data: { stripeCustomerId: customer.id },
+        })
+
+        await prisma.paymentMethod.create({
+          data: {
+            memberId: member.id,
+            stripePaymentMethodId: pm.id,
+            last4: '4242',
+            brand: 'visa',
+            expMonth: 12,
+            expYear: 2034,
+            isDefault: true,
+          },
+        })
+      } catch (e) {
+        console.warn('Dev: failed to create test payment method', e)
+      }
+    }
 
     return NextResponse.json({
       accessToken,

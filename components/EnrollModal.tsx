@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { loadStripe } from '@stripe/stripe-js'
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import { formatCurrency } from '@/lib/utils'
@@ -36,11 +36,34 @@ interface EnrollFormProps {
 
 const isDev = process.env.NEXT_PUBLIC_ENABLE_DEV_BYPASS === 'true'
 
+interface SavedCard {
+  id: string
+  stripePaymentMethodId: string
+  last4: string
+  brand: string
+  expMonth: number
+  expYear: number
+}
+
 function EnrollForm({ plan, accessToken, onSuccess, onClose }: EnrollFormProps) {
   const stripe = useStripe()
   const elements = useElements()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [defaultCard, setDefaultCard] = useState<SavedCard | null>(null)
+  const [useNewCard, setUseNewCard] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/billing/payment-methods', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+      .then(r => r.json())
+      .then(data => {
+        const def = data.paymentMethods?.find((m: any) => m.isDefault)
+        if (def) setDefaultCard(def)
+      })
+      .catch(() => {})
+  }, [accessToken])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -49,18 +72,26 @@ function EnrollForm({ plan, accessToken, onSuccess, onClose }: EnrollFormProps) 
     setLoading(true)
     setError('')
 
-    const cardElement = elements.getElement(CardElement)
-    if (!cardElement) return
+    let paymentMethodId: string
 
-    const { error: pmError, paymentMethod } = await stripe.createPaymentMethod({
-      type: 'card',
-      card: cardElement,
-    })
+    if (defaultCard && !useNewCard) {
+      paymentMethodId = defaultCard.stripePaymentMethodId
+    } else {
+      const cardElement = elements.getElement(CardElement)
+      if (!cardElement) return
 
-    if (pmError) {
-      setError(pmError.message ?? 'Card error. Please try again.')
-      setLoading(false)
-      return
+      const { error: pmError, paymentMethod } = await stripe.createPaymentMethod({
+        type: 'card',
+        card: cardElement,
+      })
+
+      if (pmError) {
+        setError(pmError.message ?? 'Card error. Please try again.')
+        setLoading(false)
+        return
+      }
+
+      paymentMethodId = paymentMethod.id
     }
 
     const res = await fetch('/api/policies', {
@@ -69,7 +100,7 @@ function EnrollForm({ plan, accessToken, onSuccess, onClose }: EnrollFormProps) 
         'Content-Type': 'application/json',
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({ planId: plan.id, paymentMethodId: paymentMethod.id }),
+      body: JSON.stringify({ planId: plan.id, paymentMethodId }),
     })
 
     const data = await res.json()
@@ -123,10 +154,37 @@ function EnrollForm({ plan, accessToken, onSuccess, onClose }: EnrollFormProps) 
 
       {/* Card input */}
       <div className="mb-6">
-        <label className="block text-sm font-medium text-gray-700 mb-2">Card details</label>
-        <div className="border border-gray-300 rounded-lg px-4 py-3 focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-transparent transition-all">
-          <CardElement options={CARD_ELEMENT_OPTIONS} />
-        </div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">Payment method</label>
+
+        {defaultCard && !useNewCard ? (
+          <div className="border border-gray-300 rounded-lg px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <svg className="w-8 h-5 text-gray-400" viewBox="0 0 32 20" fill="currentColor">
+                <rect width="32" height="20" rx="3" fill="#e5e7eb" />
+                <rect x="1" y="6" width="30" height="4" fill="#9ca3af" />
+              </svg>
+              <span className="text-sm text-gray-800 font-medium capitalize">{defaultCard.brand} ···· {defaultCard.last4}</span>
+              <span className="text-xs text-gray-400">{defaultCard.expMonth}/{defaultCard.expYear}</span>
+            </div>
+            <button type="button" onClick={() => setUseNewCard(true)}
+              className="text-xs text-indigo-600 hover:underline">
+              Use different card
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="border border-gray-300 rounded-lg px-4 py-3 focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-transparent transition-all">
+              <CardElement options={CARD_ELEMENT_OPTIONS} />
+            </div>
+            {defaultCard && (
+              <button type="button" onClick={() => setUseNewCard(false)}
+                className="text-xs text-indigo-600 hover:underline mt-1">
+                ← Use saved card
+              </button>
+            )}
+          </>
+        )}
+
         <p className="text-xs text-gray-400 mt-2 flex items-center gap-1">
           <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
             <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
