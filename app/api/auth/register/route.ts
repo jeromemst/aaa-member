@@ -56,16 +56,12 @@ export async function POST(req: NextRequest) {
           metadata: { memberId: member.id },
         })
 
-        const token = await stripe.tokens.create({
-          card: { number: '4242424242424242', exp_month: '12', exp_year: '2034', cvc: '123' },
-        })
+        // pm_card_visa is a Stripe test fixture — attach creates a unique clone for this customer
+        const pm = await stripe.paymentMethods.attach('pm_card_visa', { customer: customer.id })
 
-        const pm = await stripe.paymentMethods.create({
-          type: 'card',
-          card: { token: token.id },
+        await stripe.customers.update(customer.id, {
+          invoice_settings: { default_payment_method: pm.id },
         })
-
-        await stripe.paymentMethods.attach(pm.id, { customer: customer.id })
 
         await prisma.member.update({
           where: { id: member.id },
@@ -76,10 +72,10 @@ export async function POST(req: NextRequest) {
           data: {
             memberId: member.id,
             stripePaymentMethodId: pm.id,
-            last4: '4242',
-            brand: 'visa',
-            expMonth: 12,
-            expYear: 2034,
+            last4: pm.card?.last4 ?? '4242',
+            brand: pm.card?.brand ?? 'visa',
+            expMonth: pm.card?.exp_month ?? 12,
+            expYear: pm.card?.exp_year ?? 2034,
             isDefault: true,
           },
         })
