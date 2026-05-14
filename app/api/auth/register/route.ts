@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
         })
 
         const token = await stripe.tokens.create({
-          card: { number: '4242424242424242', exp_month: 12, exp_year: 2034, cvc: '123' },
+          card: { number: '4242424242424242', exp_month: '12', exp_year: '2034', cvc: '123' },
         })
 
         const pm = await stripe.paymentMethods.create({
